@@ -1,0 +1,648 @@
+import PageHeader from "../components/PageHeader";
+import { ImageMagicIcon } from "@shopify/polaris-icons";
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useLoaderData, useFetcher, useRevalidator } from 'react-router';
+import { authenticate } from '../shopify.server';
+import { getBillingStateCached } from '../billing.server';
+import { getUsage, getRemaining } from '../usage.server';
+import { entitled } from '../plans.server';
+import db from '../db.server';
+import { optimizeBatch } from '../optimize.server';
+import { RingGauge, Meter } from '../components/Brand';
+import Deferred from '../components/Deferred';
+import { fetchAllProductsCached, invalidateCatalog, imageNodes, parseSummary, MAX_MEDIA_PER_PRODUCT } from '../catalog.server';
+import {
+  Page,
+  Layout,
+  Button,
+  Badge,
+  Checkbox,
+  Text,
+  Box,
+  Thumbnail,
+  Banner,
+  Select,
+  EmptyState
+} from '@shopify/polaris';
+
+/* -------------------------------------------------------------------------- */
+/*  Product fetching (loader only)                                            */
+/* -------------------------------------------------------------------------- */
+
+// Budget (Shopify caps a query at 1,000 requested points): per product ≈
+// 1 + featuredMedia 3 + media(2 + 40×3) + summary 1 = 127, × 7 products ≈ 890.
+// `originalSource.fileSize` gives each image's size in the same query, so the
+// loader no longer HEAD-requests every unoptimized image on the CDN.
+const PRODUCTS_QUERY = `#graphql
+  query OptimizerProducts($cursor: String) {
+    products(first: 7, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        title
+        handle
+        status
+        featuredMedia { preview { image { url } } }
+        media(first: ${MAX_MEDIA_PER_PRODUCT}) {
+          nodes { ... on MediaImage { id alt image { url } originalSource { fileSize } } }
+        }
+        summary: metafield(namespace: "image_optimization", key: "optimization_summary") { value }
+      }
+    }
+  }
+`;
+
+/* -------------------------------------------------------------------------- */
+/*  Loader                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export async function loader({ request }) {
+  const { admin, session } = await authenticate.admin(request);
+  // Not awaited: the page renders immediately and the catalog streams in.
+  return { data: loadOptimizer(admin, session, request) };
+}
+
+async function loadOptimizer(admin, session, request) {
+  const url = new URL(request.url);
+  const filter = url.searchParams.get('filter') || 'all';
+  const sortBy = url.searchParams.get('sortBy') || 'score_asc';
+
+  // Plan, usage and per-shop settings drive the quota meter + auto-optimize UI.
+  // They're independent of each other and of the (slow) catalog fetch, so all
+  // of them run concurrently.
+  const catalogPromise = fetchAllProductsCached(admin, session.shop, PRODUCTS_QUERY);
+  catalogPromise.catch(() => {}); // awaited below; avoid an unhandled rejection meanwhile
+  const [plan, usage, autoOptimize] = await Promise.all([
+    getBillingStateCached(admin, session.shop)
+      .then((state) => state.plan)
+      .catch(() => null), // fall through to Free defaults below
+    getUsage(session.shop).catch(() => ({ period: '', imagesUsed: 0 })),
+    db.shopSettings.findUnique({ where: { shop: session.shop } })
+      .then((settings) => settings?.autoOptimize ?? false)
+      .catch(() => false), // settings table not ready yet — default to off
+  ]);
+  const planInfo = {
+    tier: plan?.tier || 'free',
+    name: plan?.name || 'Free',
+    monthlyImages: plan?.monthlyImages ?? 100,
+    autoOptimizeAllowed: entitled(plan, 'autoOptimize'),
+  };
+
+  try {
+    const { products } = await catalogPromise;
+
+    // Size of products that have never been optimized (optimized products
+    // carry totals in their summary metafield), from Shopify's stored file size.
+    const measuredByProduct = {};
+    for (const product of products) {
+      if (parseSummary(product)) continue;
+      measuredByProduct[product.id] = imageNodes(product)
+        .reduce((sum, img) => sum + (img.originalSource?.fileSize || 0) / (1024 * 1024), 0);
+    }
+
+    const processedProducts = products.map((product) => {
+      const images = imageNodes(product);
+      // The optimizer writes the summary on every batch, so a product without
+      // one has not been processed yet. Its totalImages is the full count —
+      // more accurate than the listing, which is capped at MAX_MEDIA_PER_PRODUCT.
+      const summary = parseSummary(product);
+      const imageCount = Math.max(images.length, summary?.totalImages || 0);
+      const imagesWithAlt = images.filter(img => img.alt && img.alt.length > 10).length;
+      let processed = summary ? (summary.optimizedImages || 0) : 0;
+      processed = Math.min(processed, imageCount);
+
+      let totalOriginalSize;
+      let totalOptimizedSize;
+      if (summary) {
+        totalOriginalSize = summary.totalOriginalSizeMB || 0;
+        totalOptimizedSize = summary.totalOptimizedSizeMB || 0;
+      } else {
+        totalOriginalSize = measuredByProduct[product.id] || 0;
+        totalOptimizedSize = totalOriginalSize; // nothing saved yet
+      }
+
+      const score = imageCount > 0 ? Math.round((processed / imageCount) * 100) : 0;
+      const sizeSavedMB = Math.max(0, totalOriginalSize - totalOptimizedSize);
+      const compressionRate = totalOriginalSize > 0
+        ? Math.max(0, Math.round((sizeSavedMB / totalOriginalSize) * 100))
+        : 0;
+
+      return {
+        id: product.id,
+        title: product.title,
+        handle: product.handle,
+        status: product.status,
+        imageCount,
+        imagesWithAlt,
+        optimizedImages: processed,
+        score,
+        totalOriginalSizeMB: totalOriginalSize,
+        totalOptimizedSizeMB: totalOptimizedSize,
+        sizeSavedMB,
+        compressionRate,
+        featuredImageUrl: product.featuredMedia?.preview?.image?.url || images[0]?.image.url,
+        needsOptimization: score < 100,
+      };
+    });
+
+    // Return ALL products; filtering/sorting happens instantly on the client
+    // from this list, so changing a filter never re-runs this (heavy) loader.
+    return {
+      products: processedProducts,
+      filter,
+      sortBy,
+      plan: planInfo,
+      usage,
+      autoOptimize,
+      stats: {
+        total: processedProducts.length,
+        needsOptimization: processedProducts.filter(p => p.needsOptimization).length,
+        optimized: processedProducts.filter(p => !p.needsOptimization).length,
+        totalImages: processedProducts.reduce((s, p) => s + p.imageCount, 0),
+        totalSizeMB: processedProducts.reduce((s, p) => s + p.totalOriginalSizeMB, 0),
+        potentialSavingsMB: processedProducts.reduce((s, p) => s + p.sizeSavedMB, 0),
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('Error loading products:', error);
+    return {
+      products: [],
+      filter,
+      sortBy,
+      plan: planInfo,
+      usage,
+      autoOptimize,
+      stats: { total: 0, needsOptimization: 0, optimized: 0, totalImages: 0, totalSizeMB: 0, potentialSavingsMB: 0 },
+      error: 'Failed to load products',
+    };
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Action — toggles auto-optimize, or processes ONE optimization batch       */
+/* -------------------------------------------------------------------------- */
+
+export async function action({ request }) {
+  const { admin, session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const actionType = formData.get('actionType');
+
+  if (actionType === 'setAutoOptimize') {
+    const enabled = formData.get('enabled') === 'true';
+    // Enabling is gated by plan entitlement; disabling is always allowed.
+    if (enabled) {
+      try {
+        const { plan } = await getBillingStateCached(admin, session.shop);
+        if (!entitled(plan, 'autoOptimize')) {
+          return { success: false, settingUpdated: true, error: 'Auto-Optimize is available on the Growth and Pro plans.' };
+        }
+      } catch { /* if billing check fails, fall through and block enabling */
+        return { success: false, settingUpdated: true, error: 'Could not verify your plan. Try again.' };
+      }
+    }
+    await db.shopSettings.upsert({
+      where: { shop: session.shop },
+      create: { shop: session.shop, autoOptimize: enabled },
+      update: { autoOptimize: enabled },
+    });
+    return { success: true, settingUpdated: true, autoOptimize: enabled };
+  }
+
+  if (actionType === 'optimizeProduct') {
+    const productId = formData.get('productId');
+    invalidateCatalog(session.shop); // the batch below changes this product's media
+    try {
+      const { plan } = await getBillingStateCached(admin, session.shop);
+      const remainingQuota = await getRemaining(session.shop, plan);
+      return await optimizeBatch(admin, productId, {
+        shop: session.shop,
+        remainingQuota,
+        genAlt: entitled(plan, 'altText'),
+      });
+    } catch (error) {
+      const msg = error?.graphQLErrors?.[0]?.message || error?.message || 'unknown error';
+      console.error('[OPTIMIZE] product failed:', msg);
+      return { success: false, productId, error: 'Failed to optimize product: ' + msg };
+    }
+  }
+
+  return { success: false, error: 'Invalid action' };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  UI                                                                        */
+/* -------------------------------------------------------------------------- */
+
+const HEADER_PROPS = {
+  icon: ImageMagicIcon,
+  eyebrow: 'Image Optimizer',
+  title: 'Optimize product images',
+  subtitle: 'Convert photos to WebP and replace them on each product, keeping order and variant images',
+};
+
+export default function ProductOptimizationRoute() {
+  const { data } = useLoaderData();
+  return (
+    <Deferred resolve={data} header={<PageHeader {...HEADER_PROPS} />}>
+      {(loaded) => <ProductOptimization {...loaded} />}
+    </Deferred>
+  );
+}
+
+function ProductOptimization({
+  products, filter: initialFilter, sortBy: initialSortBy, stats, error: loadError,
+  plan, usage, autoOptimize: initialAutoOptimize,
+}) {
+  const fetcher = useFetcher();
+  const settingsFetcher = useFetcher();
+  const revalidator = useRevalidator();
+
+  const [filter, setFilter] = useState(initialFilter);
+  const [sortBy, setSortBy] = useState(initialSortBy);
+  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [error, setError] = useState(loadError);
+  const [successMessage, setSuccessMessage] = useState(null);
+  const [autoOptimize, setAutoOptimize] = useState(initialAutoOptimize);
+
+  // Live per-product progress, keyed by product id, updated after every batch.
+  const [liveProgress, setLiveProgress] = useState({});
+  const [activeId, setActiveId] = useState(null);
+  const queueRef = useRef([]);
+  const activeRef = useRef(null);
+
+  // Track images optimized this session so the usage meter moves without a reload.
+  const [sessionImages, setSessionImages] = useState(0);
+  const lastOptimizedRef = useRef({}); // productId -> optimized count last seen
+
+  const startNext = useCallback(() => {
+    const next = queueRef.current.shift();
+    if (!next) {
+      activeRef.current = null;
+      setActiveId(null);
+      // Quietly re-run the loader in place (no full-page reload). The live
+      // numbers in liveProgress remain authoritative for display, so stale
+      // read-after-write metafield lag can't flip a finished product back to
+      // "needs optimization".
+      revalidator.revalidate();
+      return;
+    }
+    activeRef.current = next;
+    setActiveId(next);
+    fetcher.submit({ actionType: 'optimizeProduct', productId: next }, { method: 'post' });
+  }, [fetcher, revalidator]);
+
+  // Drive the batch loop: each completed batch either continues the same
+  // product or advances to the next queued product.
+  useEffect(() => {
+    if (fetcher.state !== 'idle' || !fetcher.data) return;
+    const data = fetcher.data;
+    if (!data.productId || data.productId !== activeRef.current) return;
+
+    if (data.success === false) {
+      setError(data.error || 'Optimization failed');
+      startNext();
+      return;
+    }
+
+    setLiveProgress(prev => ({ ...prev, [data.productId]: data }));
+
+    // Increment the session usage meter by the newly-optimized image delta.
+    const prevSeen = lastOptimizedRef.current[data.productId] || 0;
+    const delta = Math.max(0, (data.optimized || 0) - prevSeen);
+    if (delta > 0) {
+      lastOptimizedRef.current[data.productId] = data.optimized;
+      setSessionImages(s => s + delta);
+    }
+
+    // Monthly quota hit — stop the whole queue and prompt to upgrade.
+    if (data.quotaExceeded) {
+      setError('You have reached this month’s image limit. Upgrade your plan to keep optimizing.');
+      queueRef.current = [];
+      startNext();
+      return;
+    }
+
+    if (data.done) {
+      setSuccessMessage(data.message);
+      setTimeout(() => setSuccessMessage(null), 4000);
+      startNext();
+    } else if (!data.advanced) {
+      // A whole batch failed (e.g. unreachable images) — stop to avoid looping.
+      setError(`Some images for "${data.title}" couldn't be processed (${data.remaining} remaining). Try again.`);
+      startNext();
+    } else {
+      fetcher.submit({ actionType: 'optimizeProduct', productId: data.productId }, { method: 'post' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetcher.state, fetcher.data]);
+
+  // Reflect the saved auto-optimize setting (or surface a gating error).
+  useEffect(() => {
+    if (settingsFetcher.state !== 'idle' || !settingsFetcher.data) return;
+    const d = settingsFetcher.data;
+    if (!d.settingUpdated) return;
+    if (d.success) {
+      setAutoOptimize(d.autoOptimize);
+    } else {
+      setError(d.error || 'Could not update setting.');
+      setAutoOptimize(false); // revert optimistic flip
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsFetcher.state, settingsFetcher.data]);
+
+  const beginQueue = useCallback((ids) => {
+    if (!ids.length || activeRef.current) return;
+    setError(null);
+    queueRef.current = [...ids];
+    startNext();
+  }, [startNext]);
+
+  // Filter/sort are pure client-side transforms of the already-loaded product
+  // list — no server roundtrip, so the list updates instantly.
+  const handleFilterChange = useCallback((value) => setFilter(value), []);
+  const handleSortChange = useCallback((value) => setSortBy(value), []);
+
+  const handleToggleAutoOptimize = useCallback((checked) => {
+    setAutoOptimize(checked); // optimistic
+    setError(null);
+    settingsFetcher.submit(
+      { actionType: 'setAutoOptimize', enabled: String(checked) },
+      { method: 'post' }
+    );
+  }, [settingsFetcher]);
+
+  const displayedProducts = useMemo(() => {
+    let list = products;
+    if (filter === 'needs_optimization') list = list.filter(p => p.needsOptimization);
+    else if (filter === 'optimized') list = list.filter(p => !p.needsOptimization);
+    else if (filter === 'no_alt_text') list = list.filter(p => p.imagesWithAlt === 0);
+
+    // Sort a copy so we never mutate loader data (which would corrupt the next
+    // filter pass). Score reflects live progress, so re-sorts stay correct.
+    const sorted = [...list];
+    if (sortBy === 'score_asc') sorted.sort((a, b) => a.score - b.score);
+    else if (sortBy === 'score_desc') sorted.sort((a, b) => b.score - a.score);
+    else if (sortBy === 'size_desc') sorted.sort((a, b) => b.totalOriginalSizeMB - a.totalOriginalSizeMB);
+    else if (sortBy === 'images_desc') sorted.sort((a, b) => b.imageCount - a.imageCount);
+    return sorted;
+  }, [products, filter, sortBy]);
+
+  const handleSelectProduct = useCallback((id) => {
+    setSelectedProducts(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedProducts(selectedProducts.length === displayedProducts.length ? [] : displayedProducts.map(p => p.id));
+  }, [selectedProducts.length, displayedProducts]);
+
+  const handleOptimizeProduct = useCallback((id) => beginQueue([id]), [beginQueue]);
+  const handleOptimizeSelected = useCallback(() => {
+    beginQueue(selectedProducts);
+    setSelectedProducts([]);
+  }, [beginQueue, selectedProducts]);
+
+  const isBusy = activeId !== null;
+
+  // Usage meter: loader baseline + images optimized live this session.
+  const quota = plan?.monthlyImages ?? 100;
+  const usedImages = (usage?.imagesUsed ?? 0) + sessionImages;
+  const usagePct = quota > 0 ? Math.min(100, Math.round((usedImages / quota) * 100)) : 0;
+  const quotaReached = usedImages >= quota;
+
+  const formatBytes = (mb) => {
+    const v = mb || 0;
+    if (v >= 1000) return `${(v / 1000).toFixed(1)} GB`;
+    if (v >= 1) return `${v.toFixed(1)} MB`;
+    if (v > 0) return `${Math.max(1, Math.round(v * 1024))} KB`;
+    return `0 KB`;
+  };
+
+  const filterOptions = [
+    { label: 'All', value: 'all' },
+    { label: 'Not optimized', value: 'needs_optimization' },
+    { label: 'Optimized', value: 'optimized' },
+    { label: 'No alt text', value: 'no_alt_text' },
+  ];
+  const sortOptions = [
+    { label: 'Least optimized', value: 'score_asc' },
+    { label: 'Most optimized', value: 'score_desc' },
+    { label: 'Largest file size', value: 'size_desc' },
+    { label: 'Most images', value: 'images_desc' },
+  ];
+
+  // Merge loader values with any live progress for a product.
+  const view = (product) => {
+    const lp = liveProgress[product.id];
+    if (!lp) return product;
+    return {
+      ...product,
+      score: lp.score,
+      optimizedImages: lp.optimized,
+      totalOriginalSizeMB: lp.originalSizeMB || product.totalOriginalSizeMB,
+      sizeSavedMB: lp.sizeSavedMB,
+      compressionRate: lp.compressionRate,
+      needsOptimization: lp.score < 100,
+    };
+  };
+
+  const liveSavings = stats.potentialSavingsMB
+    + Object.entries(liveProgress).reduce((sum, [id, lp]) => {
+        const base = products.find(p => p.id === id)?.sizeSavedMB || 0;
+        return sum + Math.max(0, (lp.sizeSavedMB || 0) - base);
+      }, 0);
+
+  const filterCounts = {
+    all: products.length,
+    needs_optimization: products.filter(p => view(p).needsOptimization).length,
+    optimized: products.filter(p => !view(p).needsOptimization).length,
+    no_alt_text: products.filter(p => p.imagesWithAlt === 0).length,
+  };
+  const allSelected = selectedProducts.length === displayedProducts.length && displayedProducts.length > 0;
+
+  const kpis = [
+    { label: 'Products', value: stats.total.toLocaleString() },
+    { label: 'Not optimized', value: stats.needsOptimization.toLocaleString(), tone: stats.needsOptimization > 0 ? 'warn' : undefined },
+    { label: 'Images', value: stats.totalImages.toLocaleString() },
+    { label: 'Space saved', value: formatBytes(liveSavings), tone: 'good' },
+  ];
+
+  return (
+    <Page>
+      <Layout>
+        <Layout.Section>
+          <PageHeader {...HEADER_PROPS} />
+        </Layout.Section>
+
+        {error && (
+          <Layout.Section>
+            <Banner title="Something went wrong" tone="critical" onDismiss={() => setError(null)}>{error}</Banner>
+          </Layout.Section>
+        )}
+        {successMessage && (
+          <Layout.Section>
+            <Banner title="Done" tone="success" onDismiss={() => setSuccessMessage(null)}>{successMessage}</Banner>
+          </Layout.Section>
+        )}
+
+        {/* Overview: monthly quota · auto-optimize · catalog stats */}
+        <Layout.Section>
+          <div className="pl-overview">
+            <div className="pl-soft pl-quota">
+              <RingGauge pct={usagePct} size={96} stroke={9} label={`${usagePct}% of monthly images used`}>
+                <span className="pl-ring-num" style={{ fontSize: 18 }}>{`${usagePct}%`}</span>
+              </RingGauge>
+              <div>
+                <p className="pl-quota-label">This month</p>
+                <p className="pl-quota-plan">{`${usedImages.toLocaleString()} / ${quota.toLocaleString()}`}</p>
+                <p className={`pl-quota-note${quotaReached ? ' is-alert' : ''}`}>
+                  {quotaReached
+                    ? 'Monthly limit reached. Upgrade to keep optimizing.'
+                    : `${plan?.name || 'Free'} plan · ${Math.max(0, quota - usedImages).toLocaleString()} images left`}
+                </p>
+              </div>
+            </div>
+
+            <div className="pl-card pl-auto">
+              <div className="pl-auto-head">
+                <p className="pl-card-title">Auto-Optimize</p>
+                {plan?.autoOptimizeAllowed
+                  ? <Badge tone={autoOptimize ? 'success' : undefined}>{autoOptimize ? 'On' : 'Off'}</Badge>
+                  : <Badge tone="attention">Growth+</Badge>}
+              </div>
+              <p className="pl-card-sub" style={{ marginTop: 0 }}>Optimize photos on new products automatically in the background.</p>
+              {plan?.autoOptimizeAllowed ? (
+                <Checkbox
+                  label="Optimize new products automatically"
+                  checked={autoOptimize}
+                  onChange={handleToggleAutoOptimize}
+                  disabled={settingsFetcher.state !== 'idle'}
+                />
+              ) : (
+                <Text variant="bodySm" as="p" tone="subdued">Available on the Growth and Pro plans.</Text>
+              )}
+            </div>
+
+            <div className="pl-statbar pl-mini-stats">
+              {kpis.map(k => (
+                <div key={k.label} className="pl-stat">
+                  <p className="pl-stat-label">{k.label}</p>
+                  <p className={`pl-stat-value${k.tone ? ` is-${k.tone}` : ''}`}>{k.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Layout.Section>
+
+        {/* Product list */}
+        <Layout.Section>
+          <div className="pl-list">
+            <div className="pl-toolbar">
+              <div className="pl-tabs" role="tablist" aria-label="Filter products">
+                {filterOptions.map(o => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={filter === o.value}
+                    className={`pl-tab${filter === o.value ? ' is-active' : ''}`}
+                    onClick={() => handleFilterChange(o.value)}
+                    disabled={isBusy}
+                  >
+                    {o.label}
+                    <span className="pl-tab-count">{filterCounts[o.value]}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="pl-toolbar-sort">
+                <Box width="220px">
+                  <Select label="Sort" labelInline options={sortOptions} value={sortBy} onChange={handleSortChange} disabled={isBusy} />
+                </Box>
+              </div>
+            </div>
+
+            <div className="pl-row pl-row-head">
+              <Checkbox
+                label="Select all"
+                labelHidden
+                checked={allSelected}
+                onChange={handleSelectAll}
+                disabled={isBusy || displayedProducts.length === 0}
+              />
+              <span />
+              <span>Product</span>
+              <span>Images optimized</span>
+              <span>Saved</span>
+              <span>Status</span>
+              <span />
+            </div>
+
+            {displayedProducts.length === 0 ? (
+              <EmptyState heading="No products in this view" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png">
+                <p>Try a different tab to see more products.</p>
+              </EmptyState>
+            ) : (
+              displayedProducts.map((raw) => {
+                const product = view(raw);
+                const isActive = activeId === product.id;
+                const selected = selectedProducts.includes(product.id);
+                const scoreTone = product.score >= 80 ? 'good' : product.score >= 60 ? 'warn' : 'bad';
+                return (
+                  <div key={product.id} className={`pl-row${selected ? ' is-selected' : ''}${isActive ? ' is-active' : ''}`}>
+                    <Checkbox
+                      label={`Select ${product.title}`}
+                      labelHidden
+                      checked={selected}
+                      onChange={() => handleSelectProduct(product.id)}
+                      disabled={isBusy}
+                    />
+                    <Thumbnail source={product.featuredImageUrl || ImageMagicIcon} alt={product.title} size="small" />
+                    <div className="pl-row-main">
+                      <p className="pl-row-title">{product.title}</p>
+                      <p className="pl-row-meta">
+                        {`${product.status.charAt(0) + product.status.slice(1).toLowerCase()} · ${product.imageCount} ${product.imageCount === 1 ? 'image' : 'images'} · ${product.imagesWithAlt}/${product.imageCount} with alt text`}
+                        {isActive && <span className="pl-live">Optimizing</span>}
+                      </p>
+                    </div>
+                    <div className="pl-row-progress">
+                      <span>{`${product.optimizedImages} of ${product.imageCount}`}</span>
+                      <Meter pct={product.score} label={`${product.score}% optimized`} />
+                    </div>
+                    <div className="pl-row-saved">
+                      <strong>{formatBytes(product.sizeSavedMB)}</strong>
+                      <span>{`from ${formatBytes(product.totalOriginalSizeMB)}`}</span>
+                    </div>
+                    <span className={`pl-score pl-score-${scoreTone}`}>
+                      {`${product.score}%`}
+                    </span>
+                    <div className="pl-row-action">
+                      {product.needsOptimization ? (
+                        <Button size="slim" variant="primary" onClick={() => handleOptimizeProduct(product.id)} loading={isActive} disabled={isBusy || quotaReached}>
+                          Optimize
+                        </Button>
+                      ) : (
+                        <Badge tone="success">Optimized</Badge>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </Layout.Section>
+      </Layout>
+
+      {selectedProducts.length > 0 && (
+        <div className="pl-bulkbar" role="region" aria-label="Bulk actions">
+          <span className="pl-bulkbar-count"><b>{selectedProducts.length}</b>{`product${selectedProducts.length === 1 ? '' : 's'} selected`}</span>
+          <div className="pl-bulkbar-actions">
+            <button type="button" className="pl-btn pl-btn-ghost" onClick={() => setSelectedProducts([])} disabled={isBusy}>Clear</button>
+            <button type="button" className="pl-btn pl-btn-bright" onClick={handleOptimizeSelected} disabled={isBusy || quotaReached}>
+              {isBusy ? 'Optimizing…' : 'Optimize selected'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Page>
+  );
+}
