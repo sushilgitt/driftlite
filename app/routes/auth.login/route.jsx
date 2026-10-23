@@ -17,9 +17,9 @@ export default function Auth() {
   return (
     <AppProvider embedded={false}>
       <s-page>
-        <s-section heading="Open Photo Lite from Shopify">
+        <s-section heading="Open DriftLite from Shopify">
           <s-paragraph>
-            Photo Lite lives inside your Shopify admin. Get it from the Shopify App Store, or
+            DriftLite lives inside your Shopify admin. Get it from the Shopify App Store, or
             open it from Apps in your Shopify admin to continue.
           </s-paragraph>
         </s-section>

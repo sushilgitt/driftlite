@@ -8,7 +8,7 @@ import { getUsage, getRemaining } from '../usage.server';
 import { entitled } from '../plans.server';
 import db from '../db.server';
 import { optimizeBatch } from '../optimize.server';
-import { RingGauge, Meter } from '../components/Brand';
+import { Meter } from '../components/Brand';
 import Deferred from '../components/Deferred';
 import { fetchAllProductsCached, invalidateCatalog, imageNodes, parseSummary, MAX_MEDIA_PER_PRODUCT } from '../catalog.server';
 import {
@@ -485,32 +485,41 @@ function ProductOptimization({
           </Layout.Section>
         )}
 
-        {/* Overview: monthly quota · auto-optimize · catalog stats */}
+        {/* Overview: catalog stats on top, then monthly quota · auto-optimize */}
         <Layout.Section>
-          <div className="pl-overview">
-            <div className="pl-soft pl-quota">
-              <RingGauge pct={usagePct} size={96} stroke={9} label={`${usagePct}% of monthly images used`}>
-                <span className="pl-ring-num" style={{ fontSize: 18 }}>{`${usagePct}%`}</span>
-              </RingGauge>
-              <div>
-                <p className="pl-quota-label">This month</p>
-                <p className="pl-quota-plan">{`${usedImages.toLocaleString()} / ${quota.toLocaleString()}`}</p>
-                <p className={`pl-quota-note${quotaReached ? ' is-alert' : ''}`}>
-                  {quotaReached
-                    ? 'Monthly limit reached. Upgrade to keep optimizing.'
-                    : `${plan?.name || 'Free'} plan · ${Math.max(0, quota - usedImages).toLocaleString()} images left`}
-                </p>
+          <div className="dl-tiles">
+            {kpis.map(k => (
+              <div key={k.label} className="dl-tile">
+                <p className="dl-stat-label">{k.label}</p>
+                <p className={`dl-stat-value${k.tone ? ` is-${k.tone}` : ''}`}>{k.value}</p>
               </div>
+            ))}
+          </div>
+        </Layout.Section>
+
+        <Layout.Section>
+          <div className="dl-overview">
+            <div className="dl-card dl-quota">
+              <div className="dl-quota-head">
+                <p className="dl-quota-label">Images this month</p>
+                <p className="dl-quota-plan">{`${usedImages.toLocaleString()} / ${quota.toLocaleString()}`}</p>
+              </div>
+              <Meter pct={usagePct} size="lg" label={`${usagePct}% of monthly images used`} />
+              <p className={`dl-quota-note${quotaReached ? ' is-alert' : ''}`}>
+                {quotaReached
+                  ? 'Monthly limit reached. Upgrade to keep optimizing.'
+                  : `${usagePct}% used · ${plan?.name || 'Free'} plan · ${Math.max(0, quota - usedImages).toLocaleString()} images left`}
+              </p>
             </div>
 
-            <div className="pl-card pl-auto">
-              <div className="pl-auto-head">
-                <p className="pl-card-title">Auto-Optimize</p>
+            <div className="dl-card dl-auto">
+              <div className="dl-auto-head">
+                <p className="dl-card-title">Auto-Optimize</p>
                 {plan?.autoOptimizeAllowed
                   ? <Badge tone={autoOptimize ? 'success' : undefined}>{autoOptimize ? 'On' : 'Off'}</Badge>
                   : <Badge tone="attention">Growth+</Badge>}
               </div>
-              <p className="pl-card-sub" style={{ marginTop: 0 }}>Optimize photos on new products automatically in the background.</p>
+              <p className="dl-card-sub" style={{ marginTop: 0 }}>Optimize photos on new products automatically in the background.</p>
               {plan?.autoOptimizeAllowed ? (
                 <Checkbox
                   label="Optimize new products automatically"
@@ -522,46 +531,37 @@ function ProductOptimization({
                 <Text variant="bodySm" as="p" tone="subdued">Available on the Growth and Pro plans.</Text>
               )}
             </div>
-
-            <div className="pl-statbar pl-mini-stats">
-              {kpis.map(k => (
-                <div key={k.label} className="pl-stat">
-                  <p className="pl-stat-label">{k.label}</p>
-                  <p className={`pl-stat-value${k.tone ? ` is-${k.tone}` : ''}`}>{k.value}</p>
-                </div>
-              ))}
-            </div>
           </div>
         </Layout.Section>
 
         {/* Product list */}
         <Layout.Section>
-          <div className="pl-list">
-            <div className="pl-toolbar">
-              <div className="pl-tabs" role="tablist" aria-label="Filter products">
+          <div className="dl-list">
+            <div className="dl-toolbar">
+              <div className="dl-tabs" role="tablist" aria-label="Filter products">
                 {filterOptions.map(o => (
                   <button
                     key={o.value}
                     type="button"
                     role="tab"
                     aria-selected={filter === o.value}
-                    className={`pl-tab${filter === o.value ? ' is-active' : ''}`}
+                    className={`dl-tab${filter === o.value ? ' is-active' : ''}`}
                     onClick={() => handleFilterChange(o.value)}
                     disabled={isBusy}
                   >
                     {o.label}
-                    <span className="pl-tab-count">{filterCounts[o.value]}</span>
+                    <span className="dl-tab-count">{filterCounts[o.value]}</span>
                   </button>
                 ))}
               </div>
-              <div className="pl-toolbar-sort">
+              <div className="dl-toolbar-sort">
                 <Box width="220px">
                   <Select label="Sort" labelInline options={sortOptions} value={sortBy} onChange={handleSortChange} disabled={isBusy} />
                 </Box>
               </div>
             </div>
 
-            <div className="pl-row pl-row-head">
+            <div className="dl-row dl-row-head">
               <Checkbox
                 label="Select all"
                 labelHidden
@@ -588,7 +588,7 @@ function ProductOptimization({
                 const selected = selectedProducts.includes(product.id);
                 const scoreTone = product.score >= 80 ? 'good' : product.score >= 60 ? 'warn' : 'bad';
                 return (
-                  <div key={product.id} className={`pl-row${selected ? ' is-selected' : ''}${isActive ? ' is-active' : ''}`}>
+                  <div key={product.id} className={`dl-row${selected ? ' is-selected' : ''}${isActive ? ' is-active' : ''}`}>
                     <Checkbox
                       label={`Select ${product.title}`}
                       labelHidden
@@ -597,25 +597,25 @@ function ProductOptimization({
                       disabled={isBusy}
                     />
                     <Thumbnail source={product.featuredImageUrl || ImageMagicIcon} alt={product.title} size="small" />
-                    <div className="pl-row-main">
-                      <p className="pl-row-title">{product.title}</p>
-                      <p className="pl-row-meta">
+                    <div className="dl-row-main">
+                      <p className="dl-row-title">{product.title}</p>
+                      <p className="dl-row-meta">
                         {`${product.status.charAt(0) + product.status.slice(1).toLowerCase()} · ${product.imageCount} ${product.imageCount === 1 ? 'image' : 'images'} · ${product.imagesWithAlt}/${product.imageCount} with alt text`}
-                        {isActive && <span className="pl-live">Optimizing</span>}
+                        {isActive && <span className="dl-live">Optimizing</span>}
                       </p>
                     </div>
-                    <div className="pl-row-progress">
+                    <div className="dl-row-progress">
                       <span>{`${product.optimizedImages} of ${product.imageCount}`}</span>
                       <Meter pct={product.score} label={`${product.score}% optimized`} />
                     </div>
-                    <div className="pl-row-saved">
+                    <div className="dl-row-saved">
                       <strong>{formatBytes(product.sizeSavedMB)}</strong>
                       <span>{`from ${formatBytes(product.totalOriginalSizeMB)}`}</span>
                     </div>
-                    <span className={`pl-score pl-score-${scoreTone}`}>
+                    <span className={`dl-score dl-score-${scoreTone}`}>
                       {`${product.score}%`}
                     </span>
-                    <div className="pl-row-action">
+                    <div className="dl-row-action">
                       {product.needsOptimization ? (
                         <Button size="slim" variant="primary" onClick={() => handleOptimizeProduct(product.id)} loading={isActive} disabled={isBusy || quotaReached}>
                           Optimize
@@ -633,11 +633,11 @@ function ProductOptimization({
       </Layout>
 
       {selectedProducts.length > 0 && (
-        <div className="pl-bulkbar" role="region" aria-label="Bulk actions">
-          <span className="pl-bulkbar-count"><b>{selectedProducts.length}</b>{`product${selectedProducts.length === 1 ? '' : 's'} selected`}</span>
-          <div className="pl-bulkbar-actions">
-            <button type="button" className="pl-btn pl-btn-ghost" onClick={() => setSelectedProducts([])} disabled={isBusy}>Clear</button>
-            <button type="button" className="pl-btn pl-btn-bright" onClick={handleOptimizeSelected} disabled={isBusy || quotaReached}>
+        <div className="dl-bulkbar" role="region" aria-label="Bulk actions">
+          <span className="dl-bulkbar-count"><b>{selectedProducts.length}</b>{`product${selectedProducts.length === 1 ? '' : 's'} selected`}</span>
+          <div className="dl-bulkbar-actions">
+            <button type="button" className="dl-btn dl-btn-ghost" onClick={() => setSelectedProducts([])} disabled={isBusy}>Clear</button>
+            <button type="button" className="dl-btn dl-btn-bright" onClick={handleOptimizeSelected} disabled={isBusy || quotaReached}>
               {isBusy ? 'Optimizing…' : 'Optimize selected'}
             </button>
           </div>

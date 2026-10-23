@@ -466,23 +466,23 @@ function PageSpeedImpactReports({
 
         {/* Measured optimization results */}
         <Layout.Section>
-          <div className="pl-statbar">
-            <div className="pl-stat">
-              <p className="pl-stat-label">Pages optimized</p>
-              <p className="pl-stat-value">{`${optimizedProducts}`}<span style={{ fontSize: 14, fontWeight: 500, color: 'var(--pl-muted)' }}>{` / ${totalProducts}`}</span></p>
+          <div className="dl-statbar">
+            <div className="dl-stat">
+              <p className="dl-stat-label">Pages optimized</p>
+              <p className="dl-stat-value">{`${optimizedProducts}`}<span style={{ fontSize: 14, fontWeight: 500, color: 'var(--dl-muted)' }}>{` / ${totalProducts}`}</span></p>
             </div>
-            <div className="pl-stat">
-              <p className="pl-stat-label">Space saved</p>
-              <p className="pl-stat-value is-good">{`${totalSavedMB.toFixed(1)} MB`}</p>
+            <div className="dl-stat">
+              <p className="dl-stat-label">Space saved</p>
+              <p className="dl-stat-value is-good">{`${totalSavedMB.toFixed(1)} MB`}</p>
             </div>
-            <div className="pl-stat">
-              <p className="pl-stat-label">Images optimized</p>
-              <p className="pl-stat-value">{totalImagesOptimized.toLocaleString()}</p>
+            <div className="dl-stat">
+              <p className="dl-stat-label">Images optimized</p>
+              <p className="dl-stat-value">{totalImagesOptimized.toLocaleString()}</p>
             </div>
-            <div className="pl-stat">
-              <p className="pl-stat-label">Average reduction</p>
-              <p className="pl-stat-value">{`${avgCompression.toFixed(0)}%`}</p>
-              <p className="pl-stat-hint">Measured from real file sizes</p>
+            <div className="dl-stat">
+              <p className="dl-stat-label">Average reduction</p>
+              <p className="dl-stat-value">{`${avgCompression.toFixed(0)}%`}</p>
+              <p className="dl-stat-hint">Measured from real file sizes</p>
             </div>
           </div>
         </Layout.Section>

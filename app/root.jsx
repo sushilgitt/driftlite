@@ -1,5 +1,5 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
-import "./styles/photolite.css";
+import "./styles/driftlite.css";
 
 export default function App() {
   return (
@@ -11,7 +11,7 @@ export default function App() {
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
         />
         <Meta />
         <Links />

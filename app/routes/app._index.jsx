@@ -15,7 +15,7 @@ import {
   ImagesIcon,
   CheckCircleIcon,
 } from "@shopify/polaris-icons";
-import { LogoMark, RingGauge } from "../components/Brand";
+import { LogoMark, Meter } from "../components/Brand";
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
@@ -49,6 +49,14 @@ export const loader = async ({ request }) => {
   };
 };
 
+
+// First day of next month (UTC), when the image quota resets.
+function resetLabel() {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return next.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 export default function Index() {
   const navigate = useNavigate();
   const { plan, usage, autoOptimize } = useLoaderData();
@@ -73,13 +81,12 @@ export default function Index() {
       cta: "Optimize images",
       onClick: () => navigate("/app/optimize"),
       available: true,
-      wide: true,
     },
     {
       icon: MagicIcon,
       title: "Alt Text AI",
       desc: "Describes each product photo for shoppers and search engines. Review the text, then apply it in one click.",
-      cta: plan.altText ? "Write alt text" : "Available on Starter",
+      cta: plan.altText ? "Write alt text" : "See plans",
       onClick: () => navigate(plan.altText ? "/app/alt-text" : "/app/plan"),
       available: plan.altText,
       badge: plan.altText ? undefined : { label: "Starter+", tone: "attention" },
@@ -88,7 +95,7 @@ export default function Index() {
       icon: AutomationIcon,
       title: "Auto-Optimize",
       desc: "Every new product is optimized in the background as soon as it is created.",
-      cta: plan.autoOptimizeAllowed ? "Manage" : "Available on Growth",
+      cta: plan.autoOptimizeAllowed ? "Manage" : "See plans",
       onClick: () => navigate(plan.autoOptimizeAllowed ? "/app/optimize" : "/app/plan"),
       available: plan.autoOptimizeAllowed,
       badge: autoStatus,
@@ -97,11 +104,10 @@ export default function Index() {
       icon: GaugeIcon,
       title: "Speed Report",
       desc: "Run Google Lighthouse on any product page and see the page weight you removed, page by page.",
-      cta: plan.pageSpeed ? "Open Speed Report" : "Available on Growth",
+      cta: plan.pageSpeed ? "Open report" : "See plans",
       onClick: () => navigate(plan.pageSpeed ? "/app/speed" : "/app/plan"),
       available: plan.pageSpeed,
       badge: plan.pageSpeed ? undefined : { label: "Growth+", tone: "attention" },
-      wide: true,
     },
   ];
 
@@ -114,66 +120,86 @@ export default function Index() {
 
   return (
     <Page>
-      <section className="pl-soft pl-hero">
-        <div className="pl-hero-top">
-          <div>
-            <span className="pl-chip"><LogoMark size={18} />Photo Lite</span>
-            <h1>
-              Lighter photos. <span className="pl-accent">Faster store.</span>
-            </h1>
-            <p className="pl-hero-sub">
-              Optimize product images, add AI alt text and check page speed, all inside your
-              Shopify admin.
-            </p>
-            <div className="pl-actions">
-              <button type="button" className="pl-btn pl-btn-primary" onClick={() => navigate("/app/optimize")}>
-                Optimize images
-              </button>
-              <button type="button" className="pl-btn pl-btn-outline" onClick={() => navigate("/app/plan")}>
-                Plans &amp; usage
-              </button>
-            </div>
-          </div>
-
-          <div className="pl-hero-gauge">
-            <RingGauge pct={pct} size={150} stroke={13} label={`${pct}% of this month's images used`}>
-              <span className="pl-ring-num">{`${pct}%`}</span>
-              <span className="pl-ring-unit">used</span>
-            </RingGauge>
-            <p className="pl-hero-gauge-caption">{`${fmt(used)} of ${fmt(quota)} images · resets monthly`}</p>
+      <section className="dl-banner">
+        <div className="dl-banner-copy">
+          <span className="dl-chip"><LogoMark size={18} />DriftLite</span>
+          <h1>
+            Every product photo, <span className="dl-accent">lighter.</span>
+          </h1>
+          <p className="dl-banner-sub">
+            Shrink product images, write AI alt text and check page speed without leaving your
+            Shopify admin.
+          </p>
+          <div className="dl-actions">
+            <button type="button" className="dl-btn dl-btn-bright" onClick={() => navigate("/app/optimize")}>
+              Optimize images
+            </button>
+            <button type="button" className="dl-btn dl-btn-ghost" onClick={() => navigate("/app/plan")}>
+              Plans &amp; usage
+            </button>
           </div>
         </div>
 
-        <div className="pl-hero-stats">
-          {stats.map((s) => (
-            <div key={s.label} className="pl-hero-stat">
-              <p className="pl-hero-stat-label"><Icon source={s.icon} />{s.label}</p>
-              <p className="pl-hero-stat-value">{s.value}</p>
-            </div>
-          ))}
+        <div className="dl-banner-usage">
+          <p className="dl-banner-usage-label">This month</p>
+          <p className="dl-banner-usage-num">
+            {fmt(used)}<span>{` / ${fmt(quota)} images`}</span>
+          </p>
+          <Meter pct={pct} dark size="lg" label={`${pct}% of this month's images used`} />
+          <p className="dl-banner-usage-note">{`${pct}% used · resets ${resetLabel()}`}</p>
         </div>
       </section>
 
-      <div className="pl-section-head">
-        <p className="pl-section-title">Your tools</p>
-        <p className="pl-section-note">{`${tools.filter((t) => t.available).length} of ${tools.length} included in ${plan.name}`}</p>
-      </div>
-      <div className="pl-bento">
-        {tools.map((t) => (
-          <div key={t.title} className={`pl-tool${t.wide ? " pl-tool--wide" : ""}${t.available ? "" : " pl-tool-locked"}`}>
-            <div className="pl-tool-top">
-              <span className="pl-tool-icon"><Icon source={t.icon} /></span>
-              {t.badge && <Badge tone={t.badge.tone}>{t.badge.label}</Badge>}
-            </div>
-            <p className="pl-tool-title">{t.title}</p>
-            <p className="pl-tool-desc">{t.desc}</p>
-            <div className="pl-tool-cta">
-              <Button variant={t.available ? "primary" : "secondary"} onClick={t.onClick}>
-                {t.cta}
-              </Button>
-            </div>
+      <div className="dl-home">
+        <div className="dl-home-main">
+          <div className="dl-section-head">
+            <p className="dl-section-title">Tools</p>
+            <p className="dl-section-note">{`${tools.filter((t) => t.available).length} of ${tools.length} included in ${plan.name}`}</p>
           </div>
-        ))}
+          <div className="dl-toollist">
+            {tools.map((t) => (
+              <div key={t.title} className={`dl-tool${t.available ? "" : " dl-tool-locked"}`}>
+                <span className="dl-tool-icon"><Icon source={t.icon} /></span>
+                <div className="dl-tool-body">
+                  <div className="dl-tool-title-row">
+                    <p className="dl-tool-title">{t.title}</p>
+                    {t.badge && <Badge tone={t.badge.tone}>{t.badge.label}</Badge>}
+                  </div>
+                  <p className="dl-tool-desc">{t.desc}</p>
+                </div>
+                <div className="dl-tool-cta">
+                  <Button variant={t.available ? "primary" : "secondary"} onClick={t.onClick}>
+                    {t.cta}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <aside className="dl-home-aside">
+          <div className="dl-card">
+            <p className="dl-card-title">At a glance</p>
+            <ul className="dl-glance">
+              {stats.map((s) => (
+                <li key={s.label}>
+                  <span className="dl-glance-icon"><Icon source={s.icon} /></span>
+                  <span className="dl-glance-label">{s.label}</span>
+                  <span className="dl-glance-value">{s.value}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          {plan.tier !== "pro" && (
+            <div className="dl-card dl-upsell">
+              <p className="dl-card-title">Need more images?</p>
+              <p className="dl-card-sub">Higher plans raise your monthly limit and unlock Auto-Optimize and the Speed Report.</p>
+              <button type="button" className="dl-btn dl-btn-outline dl-upsell-btn" onClick={() => navigate("/app/plan")}>
+                Compare plans
+              </button>
+            </div>
+          )}
+        </aside>
       </div>
       <div style={{ height: 24 }} />
     </Page>

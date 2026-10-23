@@ -31,44 +31,42 @@ const FEATURES = [
 export default function App() {
   return (
     <main className={styles.page}>
-      <div className={styles.shell}>
-        <header className={styles.brand}>
-          <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true">
-            <rect width="24" height="24" rx="7" fill="#22C55E" />
-            <circle cx="11.5" cy="13" r="5.25" fill="none" stroke="#fff" strokeWidth="2.2" />
-            <circle cx="18" cy="6" r="2.1" fill="#fff" />
-          </svg>
-          Photo Lite
-        </header>
+      <section className={styles.band}>
+        <div className={styles.shell}>
+          <header className={styles.brand}>
+            <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
+              <rect width="24" height="24" rx="6" fill="#22D3EE" />
+              <path d="M4.5 10.5c2.2-2.4 4.4-2.4 6.6 0s4.4 2.4 6.6 0" fill="none" stroke="#0B1B33" strokeWidth="2.2" strokeLinecap="round" />
+              <path d="M4.5 15.5c2.2-2.4 4.4-2.4 6.6 0s4.4 2.4 6.6 0" fill="none" stroke="#0B1B33" strokeOpacity="0.45" strokeWidth="2.2" strokeLinecap="round" />
+              <circle cx="18.6" cy="5.6" r="1.7" fill="#F2665A" />
+            </svg>
+            DriftLite
+          </header>
+          <h1 className={styles.heading}>
+            Every product photo, <span>lighter.</span>
+          </h1>
+          <p className={styles.text}>
+            DriftLite shrinks your Shopify product images, writes alt text with AI and measures
+            how much faster your product pages load.
+          </p>
+          <p className={styles.note}>
+            Install DriftLite from the Shopify App Store, then open it from <strong>Apps</strong> in
+            your Shopify admin.
+          </p>
+        </div>
+      </section>
 
-        <section className={styles.hero}>
-          <div>
-            <h1 className={styles.heading}>
-              Lighter photos. <span>Faster store.</span>
-            </h1>
-            <p className={styles.text}>
-              Photo Lite optimizes your Shopify product images, writes alt text with AI and
-              measures how much faster your product pages load.
-            </p>
-            <p className={styles.note}>
-              Install Photo Lite from the Shopify App Store, then open it from <strong>Apps</strong> in
-              your Shopify admin.
-            </p>
-          </div>
-
-          <ol className={styles.list}>
-            {FEATURES.map((f, i) => (
-              <li key={f.title}>
-                <span className={styles.num}>{String(i + 1).padStart(2, "0")}</span>
-                <div>
-                  <strong>{f.title}</strong>
-                  <p>{f.text}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      </div>
+      <section className={styles.shell}>
+        <ol className={styles.list}>
+          {FEATURES.map((f, i) => (
+            <li key={f.title}>
+              <span className={styles.num}>{String(i + 1).padStart(2, "0")}</span>
+              <strong>{f.title}</strong>
+              <p>{f.text}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
     </main>
   );
 }

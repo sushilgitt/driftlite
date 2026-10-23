@@ -337,7 +337,7 @@ export async function action({ request }) {
       return { 
         success: true, 
         csv,
-        filename: `photolite-report-${timeRange}-${Date.now()}.csv`
+        filename: `driftlite-report-${timeRange}-${Date.now()}.csv`
       };
     } catch (error) {
       console.error('Error generating report:', error);

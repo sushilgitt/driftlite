@@ -1,5 +1,5 @@
 {
-  "name": "photo-lite",
+  "name": "driftlite",
   "private": true,
   "scripts": {
     "build": "react-router build",
@@ -72,5 +72,5 @@
   "overrides": {
     "p-map": "^4.0.0"
   },
-  "author": "photo-lite"
+  "author": "driftlite"
 }

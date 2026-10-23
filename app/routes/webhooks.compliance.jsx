@@ -5,7 +5,7 @@
 // compliance checks require); see webhooks.server.js for why the session
 // refresh that follows must not turn a valid webhook into a 500.
 //
-// Photo Lite stores no customer personal data — only per-shop sessions, the
+// DriftLite stores no customer personal data — only per-shop sessions, the
 // monthly usage counter and app settings — so the two customer topics have
 // nothing to export or erase. shop/redact (sent 48h after uninstall) erases
 // everything stored for the shop.

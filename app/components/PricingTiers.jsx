@@ -12,11 +12,11 @@ import { LogoMark, CheckGlyph } from "./Brand";
 // charged is set on the Partner Dashboard plans, so keep the two in sync.
 export default function PricingTiers({ pricingUrl }) {
   return (
-    <div className="pl-pricing">
-      <header className="pl-soft pl-pricing-band">
-        <span className="pl-chip"><LogoMark size={18} />Photo Lite plans</span>
+    <div className="dl-pricing">
+      <header className="dl-soft dl-pricing-band">
+        <span className="dl-chip"><LogoMark size={18} />DriftLite plans</span>
         <h1>
-          Faster product pages, <span className="pl-accent">at any size.</span>
+          Faster product pages, <span className="dl-accent">at any size.</span>
         </h1>
         <p>
           Optimize photos, write alt text with AI and measure the speed you gain. Start free and
@@ -24,22 +24,22 @@ export default function PricingTiers({ pricingUrl }) {
         </p>
       </header>
 
-      <div className="pl-pricing-grid">
+      <div className="dl-pricing-grid">
         {PLAN_TIERS.map((tier) => (
-          <div key={tier.name} className={`pl-price-card${tier.popular ? " is-popular" : ""}`}>
-            {tier.popular && <span className="pl-price-flag">MOST POPULAR</span>}
-            <p className="pl-price-name">{tier.name}</p>
-            <p className="pl-price-tag">{tier.tagline}</p>
-            <p className="pl-price-amount">
+          <div key={tier.name} className={`dl-price-card${tier.popular ? " is-popular" : ""}`}>
+            {tier.popular && <span className="dl-price-flag">MOST POPULAR</span>}
+            <p className="dl-price-name">{tier.name}</p>
+            <p className="dl-price-tag">{tier.tagline}</p>
+            <p className="dl-price-amount">
               {`$${tier.price}`}<span>per month</span>
             </p>
-            <p className="pl-price-annual">
+            <p className="dl-price-annual">
               {tier.price === 0 ? "Free forever, no card required" : `Or $${tier.priceAnnual}/year and save ~17%`}
             </p>
-            <a href={pricingUrl} target="_top" className={`pl-btn ${tier.popular ? "pl-btn-primary" : "pl-btn-outline"} pl-price-cta`}>
+            <a href={pricingUrl} target="_top" className={`dl-btn ${tier.popular ? "dl-btn-primary" : "dl-btn-outline"} dl-price-cta`}>
               {tier.price === 0 ? "Start free" : `Choose ${tier.name}`}
             </a>
-            <ul className="pl-price-features">
+            <ul className="dl-price-features">
               {tier.features.map((f) => (
                 <li key={f}><CheckGlyph />{f}</li>
               ))}
@@ -48,7 +48,7 @@ export default function PricingTiers({ pricingUrl }) {
         ))}
       </div>
 
-      <p className="pl-pricing-foot">Billed securely through Shopify. Change or cancel your plan at any time.</p>
+      <p className="dl-pricing-foot">Billed securely through Shopify. Change or cancel your plan at any time.</p>
     </div>
   );
 }

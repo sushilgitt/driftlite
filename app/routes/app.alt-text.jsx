@@ -699,22 +699,22 @@ function AltTextSuggestions({ images: initialImages, loadError, truncated }) {
         )}
 
         <Layout.Section>
-          <div className="pl-statbar">
-            <div className="pl-stat">
-              <p className="pl-stat-label">Products</p>
-              <p className="pl-stat-value">{productCount.toLocaleString()}</p>
+          <div className="dl-statbar">
+            <div className="dl-stat">
+              <p className="dl-stat-label">Products</p>
+              <p className="dl-stat-value">{productCount.toLocaleString()}</p>
             </div>
-            <div className="pl-stat">
-              <p className="pl-stat-label">Images</p>
-              <p className="pl-stat-value">{totalImages.toLocaleString()}</p>
+            <div className="dl-stat">
+              <p className="dl-stat-label">Images</p>
+              <p className="dl-stat-value">{totalImages.toLocaleString()}</p>
             </div>
-            <div className="pl-stat">
-              <p className="pl-stat-label">Awaiting review</p>
-              <p className={`pl-stat-value${pendingCount > 0 ? ' is-warn' : ''}`}>{pendingCount.toLocaleString()}</p>
+            <div className="dl-stat">
+              <p className="dl-stat-label">Awaiting review</p>
+              <p className={`dl-stat-value${pendingCount > 0 ? ' is-warn' : ''}`}>{pendingCount.toLocaleString()}</p>
             </div>
-            <div className="pl-stat">
-              <p className="pl-stat-label">Applied</p>
-              <p className="pl-stat-value is-good">{appliedCount.toLocaleString()}</p>
+            <div className="dl-stat">
+              <p className="dl-stat-label">Applied</p>
+              <p className="dl-stat-value is-good">{appliedCount.toLocaleString()}</p>
             </div>
           </div>
         </Layout.Section>
